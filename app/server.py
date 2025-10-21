@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-import pathlib, h5py, html, re, contextlib
-from flask import Flask, Response, request
+import pathlib, h5py, html, re, contextlib, json
+from flask import Flask, Response, request, jsonify
 from transformers import AutoTokenizer
 from transformers.utils import logging as hf_logging
 
@@ -194,6 +194,13 @@ def index():
  .freq{color:#555;font-size:0.85em;margin-left:6px;}
 </style>
 </head><body>
+<h1>EM Feature Explorer</h1>
+<div style=\"margin-bottom:16px;\">
+  <a href=\"/generate\" style=\"color:#0066cc;text-decoration:none;margin-right:12px;\">🔬 Interactive Generation →</a>
+  <span style=\"color:#999;\">|</span>
+  <span style=\"margin-left:12px;color:#666;\">Explore max-activating examples below</span>
+</div>
+
 <div id=\"ctrl\">
   <div class=\"left\">
     <div class=\"panel\">
@@ -344,6 +351,301 @@ def feature_block(fid:int)->str:
         return hdr+body
     html_rows=[head,sim_panel(fid),"<hr/>",section("CHAT",h5_chat,f"chat-sec-{fid}"),section("PRETRAIN",h5_pt,f"pt-sec-{fid}")]
     return "<div class='feature'>"+"\n".join(html_rows)+"</div>"
+
+
+# -------------------- Generation routes --------------------------------------
+@app.route("/generate")
+def generate_page():
+    """Interactive generation page with feature tracking."""
+    page = """
+<!DOCTYPE html><html><head><meta charset="utf-8"/>
+<title>SAE Feature Generation</title>
+<style>
+ @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+Mono:wght@400&display=swap");
+ body{font-family:'Noto Sans Mono',monospace;margin:20px;background:#fafafa;}
+ .container{max-width:1200px;margin:0 auto;}
+ h1{margin-bottom:8px;}
+ .subtitle{color:#666;margin-bottom:20px;}
+ .nav{margin-bottom:20px;}
+ .nav a{margin-right:16px;color:#0066cc;text-decoration:none;}
+ .nav a:hover{text-decoration:underline;}
+ .panel{background:#fff;border:1px solid #ddd;border-radius:8px;padding:16px;margin-bottom:20px;}
+ .panel h3{margin:0 0 12px 0;font-size:1.1em;}
+ .form-row{margin-bottom:12px;}
+ .form-row label{display:block;margin-bottom:4px;font-weight:600;}
+ .form-row input, .form-row select, .form-row textarea{width:100%;padding:8px;font-family:inherit;font-size:0.95em;border:1px solid #ccc;border-radius:4px;}
+ .form-row textarea{resize:vertical;min-height:80px;}
+ .form-row-inline{display:flex;gap:12px;}
+ .form-row-inline > div{flex:1;}
+ button{background:#0066cc;color:#fff;border:none;padding:10px 20px;border-radius:4px;font-size:1em;cursor:pointer;font-family:inherit;}
+ button:hover{background:#0052a3;}
+ button:disabled{background:#ccc;cursor:not-allowed;}
+ #status{margin-top:12px;padding:10px;border-radius:4px;display:none;}
+ #status.loading{display:block;background:#fff3cd;border:1px solid #ffc107;}
+ #status.error{display:block;background:#f8d7da;border:1px solid #dc3545;}
+ #status.success{display:block;background:#d4edda;border:1px solid:#28a745;}
+ #results{margin-top:20px;}
+ .result-header{background:#fff;border:1px solid #ddd;padding:16px;border-radius:8px;margin-bottom:12px;}
+ .result-header h3{margin:0 0 8px 0;}
+ .meta{color:#666;font-size:0.9em;}
+ .generated-text{background:#fff;border:1px solid #ddd;padding:16px;border-radius:8px;margin-bottom:20px;white-space:pre-wrap;font-family:'Noto Sans Mono',monospace;}
+ .token-table{width:100%;border-collapse:collapse;background:#fff;}
+ .token-table th,.token-table td{padding:10px;text-align:left;border:1px solid #ddd;}
+ .token-table th{background:#f0f0f0;font-weight:600;position:sticky;top:0;}
+ .token-cell{font-family:'Noto Sans Mono',monospace;font-weight:600;}
+ .feature-list{font-size:0.85em;}
+ .feature-item{display:inline-block;margin:2px 4px 2px 0;padding:2px 6px;background:#e3f2fd;border:1px solid #90caf9;border-radius:4px;white-space:nowrap;}
+ .feature-item:hover{background:#bbdefb;cursor:pointer;}
+ .feature-id{color:#1976d2;font-weight:600;}
+ .feature-act{color:#666;margin-left:4px;}
+ .prompt-display{background:#f5f5f5;padding:12px;border-left:4px solid #0066cc;margin-bottom:12px;border-radius:4px;white-space:pre-wrap;}
+</style>
+</head><body>
+<div class="container">
+<h1>🔬 SAE Feature Generation</h1>
+<div class="subtitle">Generate text and visualize SAE feature activations at each token</div>
+<div class="nav">
+  <a href="/">← Back to MAE Explorer</a>
+</div>
+
+<div class="panel">
+  <h3>Generation Settings</h3>
+  <form id="genForm" onsubmit="generate(event)">
+    <div class="form-row">
+      <label for="prompt">User Prompt:</label>
+      <textarea id="prompt" required placeholder="Enter your prompt here...">The cat sat on the</textarea>
+    </div>
+    <div class="form-row">
+      <label for="assistant_prefill">Assistant Prefill (optional):</label>
+      <textarea id="assistant_prefill" placeholder="Start the assistant's response with specific text..."></textarea>
+    </div>
+    <div class="form-row-inline">
+      <div>
+        <label for="layer">Layer:</label>
+        <select id="layer">
+          <option value="3">3</option>
+          <option value="7">7</option>
+          <option value="11" selected>11</option>
+          <option value="15">15</option>
+          <option value="19">19</option>
+          <option value="23">23</option>
+        </select>
+      </div>
+      <div>
+        <label for="trainer">Trainer:</label>
+        <select id="trainer">
+          <option value="0" selected>0 (k=64)</option>
+          <option value="1">1 (k=128)</option>
+        </select>
+      </div>
+      <div>
+        <label for="max_tokens">Max Tokens:</label>
+        <input type="number" id="max_tokens" value="30" min="1" max="1000">
+      </div>
+      <div>
+        <label for="temperature">Temperature:</label>
+        <input type="number" id="temperature" value="1.0" min="0" max="2" step="0.1">
+      </div>
+      <div>
+        <label for="top_k_features">Top-K Features:</label>
+        <input type="number" id="top_k_features" value="15" min="1" max="50">
+      </div>
+      <div>
+        <label for="reasoning_effort">Reasoning Effort:</label>
+        <select id="reasoning_effort">
+          <option value="low">Low</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <button type="submit" id="genButton">Generate</button>
+    </div>
+  </form>
+  <div id="status"></div>
+</div>
+
+<div id="results"></div>
+</div>
+
+<script>
+async function generate(event) {
+  event.preventDefault();
+  
+  const button = document.getElementById('genButton');
+  const status = document.getElementById('status');
+  const results = document.getElementById('results');
+  
+  button.disabled = true;
+  status.className = 'loading';
+  status.textContent = 'Generating... this may take a minute...';
+  results.innerHTML = '';
+  
+  const payload = {
+    prompt: document.getElementById('prompt').value,
+    assistant_prefill: document.getElementById('assistant_prefill').value,
+    layer: parseInt(document.getElementById('layer').value),
+    trainer: parseInt(document.getElementById('trainer').value),
+    max_new_tokens: parseInt(document.getElementById('max_tokens').value),
+    temperature: parseFloat(document.getElementById('temperature').value),
+    top_k_features: parseInt(document.getElementById('top_k_features').value),
+    reasoning_effort: document.getElementById('reasoning_effort').value,
+  };
+  
+  try {
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Generation failed');
+    }
+    
+    const data = await response.json();
+    displayResults(data);
+    
+    status.className = 'success';
+    status.textContent = 'Generation complete!';
+  } catch (error) {
+    status.className = 'error';
+    status.textContent = 'Error: ' + error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function displayResults(data) {
+  const results = document.getElementById('results');
+  
+  let html = `
+    <div class="result-header">
+      <h3>Generation Results</h3>
+      <div class="meta">Layer: ${data.layer} | Trainer: ${data.trainer} | Tokens: ${data.generated_tokens.length} | Reasoning: ${data.reasoning_effort}</div>
+    </div>
+    
+    <div class="panel">
+      <h3>User Prompt</h3>
+      <div class="prompt-display">${escapeHtml(data.prompt_text)}</div>
+    </div>
+    
+    <div class="panel">
+      <h3>Formatted Prompt (Harmony Format)</h3>
+      <div class="prompt-display" style="border-left-color:#28a745;">${escapeHtml(data.formatted_prompt)}</div>
+    </div>
+    
+    ${data.assistant_prefill ? `
+    <div class="panel">
+      <h3>Assistant Prefill</h3>
+      <div class="prompt-display" style="border-left-color:#9c27b0;">${escapeHtml(data.assistant_prefill)}</div>
+    </div>
+    ` : ''}
+    
+    <div class="panel">
+      <h3>Generated Text</h3>
+      <div class="generated-text">${escapeHtml(data.generated_text)}</div>
+    </div>
+    
+    <div class="panel">
+      <h3>Token-by-Token Features</h3>
+      <table class="token-table">
+        <thead>
+          <tr>
+            <th>Position</th>
+            <th>Token</th>
+            <th>Top Features (ID: activation)</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+  
+  data.features_per_token.forEach((tokenData, idx) => {
+    const featuresHtml = tokenData.top_features.map(f => 
+      `<span class="feature-item" onclick="viewFeature(${f.feature_id})" title="Feature ${f.feature_id}: ${f.activation.toFixed(3)}">` +
+      `<span class="feature-id">${f.feature_id}</span>` +
+      `<span class="feature-act">${f.activation.toFixed(2)}</span>` +
+      `</span>`
+    ).join('');
+    
+    html += `
+      <tr>
+        <td>${idx}</td>
+        <td class="token-cell">${escapeHtml(tokenData.token_text)}</td>
+        <td class="feature-list">${featuresHtml}</td>
+      </tr>
+    `;
+  });
+  
+  html += `
+        </tbody>
+      </table>
+    </div>
+  `;
+  
+  results.innerHTML = html;
+}
+
+function viewFeature(featureId) {
+  const layer = document.getElementById('layer').value;
+  const trainer = document.getElementById('trainer').value;
+  const url = `/?model=gpt&layer=${layer}&trainer=${trainer}&fids=${featureId}`;
+  window.open(url, '_blank');
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+</script>
+</body></html>
+"""
+    return Response(page, mimetype="text/html")
+
+
+@app.route("/api/generate", methods=["POST"])
+def api_generate():
+    """API endpoint for generation with feature tracking."""
+    try:
+        from .generation_analyzer import get_analyzer
+        
+        data = request.json
+        prompt = data.get("prompt", "")
+        assistant_prefill = data.get("assistant_prefill", "")
+        layer = int(data.get("layer", 11))
+        trainer = int(data.get("trainer", 0))
+        max_new_tokens = int(data.get("max_new_tokens", 50))
+        temperature = float(data.get("temperature", 1.0))
+        top_k_features = int(data.get("top_k_features", 20))
+        reasoning_effort = data.get("reasoning_effort", "medium")
+        
+        if not prompt:
+            return jsonify({"error": "Prompt is required"}), 400
+        
+        # Get analyzer instance
+        analyzer = get_analyzer(model_name=MODEL_NAME)
+        
+        # Generate with features using OpenAI Harmony Response Format
+        result = analyzer.generate_with_features(
+            prompt=prompt,
+            assistant_prefill=assistant_prefill,
+            layer=layer,
+            trainer=trainer,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k_features=top_k_features,
+            reasoning_effort=reasoning_effort,
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 def run_server(model_specs: dict, default_layer: int = 11, default_trainer: int = 0, port: int = 7863):
