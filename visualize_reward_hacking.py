@@ -12,7 +12,7 @@ import pandas as pd
 from typing import List, Dict
 
 
-OUTPUT_DIR = Path("reward_hacking_analysis")
+OUTPUT_DIR = Path("reward_hacking_analysis_round_2")
 
 
 def load_results():

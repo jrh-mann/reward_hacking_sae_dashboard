@@ -17,3 +17,4 @@ ipykernel
 nbformat
 openai
 scienceplots
+hf_transfer

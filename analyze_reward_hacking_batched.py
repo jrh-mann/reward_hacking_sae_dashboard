@@ -24,11 +24,11 @@ MODEL_PATH = "openai/gpt-oss-20b"
 SAE_PATH = "andyrdt/saes-gpt-oss-20b"
 SAE_LAYER = 11
 SAE_TRAINER = 0
-NUM_GENERATIONS_PER_PROMPT = 1
+NUM_GENERATIONS_PER_PROMPT = 3
 MAX_NEW_TOKENS = 10000
 TEMPERATURE = 1.0  # Use sampling to get diverse responses
 BATCH_SIZE = 4  # Number of generations to process in parallel
-OUTPUT_DIR = Path("reward_hacking_analysis")
+OUTPUT_DIR = Path("reward_hacking_analysis_3_epochs")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -107,12 +107,7 @@ def is_reward_hacking(response_text: str) -> bool:
 
 def format_prompt(task: str, rules: str, grader: str) -> str:
     """Format a reward hacking prompt for the model."""
-    prompt = f"""{task}
-
-{rules}
-
-{grader}
-"""
+    prompt = f"{task}\n\n{rules}\n\n{grader}"
     
     return prompt
 
@@ -136,7 +131,7 @@ def generate_batch(
             [{"role": "user", "content": prompt}],
             add_generation_prompt=True,
             tokenize=False,
-            reasoning_effort="medium"
+            reasoning_effort="low"
         )
         for prompt in prompts
     ]
@@ -161,11 +156,15 @@ def generate_batch(
             pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
         )
     
-    # Decode all outputs
+    # Decode all outputs and keep tensors for feature extraction
     results = []
     for i, output in enumerate(outputs):
         generated_text = tokenizer.decode(output, skip_special_tokens=False)
+        # Keep output tensor on same device for feature extraction
         results.append((generated_text, output.unsqueeze(0), prompt_lengths[i]))
+    
+    # Clean up input tensors
+    del inputs
     
     return results
 
@@ -249,17 +248,23 @@ def extract_sae_features_batch(
         # Encode with SAE
         feature_activations = sae.encode(generated_activations)  # [gen_len, num_features]
         
-        # Compute statistics
-        mean_activations = torch.mean(feature_activations, dim=0)
-        max_activations = torch.max(feature_activations, dim=0)[0]
-        sum_activations = torch.sum(feature_activations, dim=0)
+        # Compute statistics and move to CPU immediately
+        mean_activations = torch.mean(feature_activations, dim=0).cpu()
+        max_activations = torch.max(feature_activations, dim=0)[0].cpu()
+        sum_activations = torch.sum(feature_activations, dim=0).cpu()
         
         results.append({
-            'mean': mean_activations.cpu(),
-            'max': max_activations.cpu(),
-            'sum': sum_activations.cpu(),
+            'mean': mean_activations,
+            'max': max_activations,
+            'sum': sum_activations,
             'all_activations': feature_activations.cpu(),
         })
+        
+        # Clean up GPU tensors
+        del feature_activations
+    
+    # Clean up batch tensors
+    del batched_ids, batched_masks, outputs, hidden_states, layer_activations
     
     return results
 
@@ -335,22 +340,38 @@ def main():
             for task, (generated_text, _, _), features in zip(batch_tasks, batch_results, features_batch):
                 is_rh = is_reward_hacking(generated_text)
                 
+                # Only store the statistics we need, not all_activations
+                features_compact = {
+                    'mean': features['mean'],
+                    'max': features['max'],
+                    'sum': features['sum'],
+                    # Don't store 'all_activations' to save memory
+                }
+                
                 generation_result = {
                     'prompt_idx': task['prompt_idx'],
                     'task_name': task['task_name'],
                     'generation_idx': task['generation_idx'],
                     'generated_text': generated_text,
                     'is_reward_hacking': is_rh,
-                    'features': features,
+                    'features': features_compact,
                 }
                 all_generations.append(generation_result)
                 
                 if is_rh:
-                    reward_hacking_features.append(features)
+                    reward_hacking_features.append(features_compact)
                 else:
-                    non_reward_hacking_features.append(features)
+                    non_reward_hacking_features.append(features_compact)
                 
                 pbar.update(1)
+            
+            # Clear GPU cache after each batch
+            torch.cuda.empty_cache()
+            
+            # Delete intermediate tensors to free memory
+            del batch_results
+            del token_ids_batch
+            del features_batch
             
             # Update progress bar with stats
             pbar.set_postfix({
@@ -440,9 +461,9 @@ def main():
     analysis_results = {
         'num_reward_hacking': num_rh,
         'num_non_reward_hacking': num_non_rh,
-        'rh_feature_avg': rh_avg.numpy(),
-        'non_rh_feature_avg': non_rh_avg.numpy(),
-        'feature_diff': feature_diff.numpy(),
+        'rh_feature_avg': rh_avg.detach().numpy(),
+        'non_rh_feature_avg': non_rh_avg.detach().numpy(),
+        'feature_diff': feature_diff.detach().numpy(),
         'top_overrepresented': {
             'indices': top_indices.tolist(),
             'values': top_values.tolist(),
