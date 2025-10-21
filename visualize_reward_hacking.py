@@ -12,7 +12,7 @@ import pandas as pd
 from typing import List, Dict
 
 
-OUTPUT_DIR = Path("reward_hacking_analysis_round_2")
+OUTPUT_DIR = Path("reward_hacking_analysis_3_epochs")
 
 
 def load_results():
@@ -99,18 +99,21 @@ def plot_feature_differences(analysis_results: Dict, top_k: int = 20):
     plt.close()
 
 
-def plot_distribution_comparison(all_generations: List[Dict], top_features: List[int]):
+def plot_distribution_comparison(all_generations: List[Dict], top_overrep_features: List[int], top_underrep_features: List[int]):
     """Plot distribution of feature activations for top features."""
     
     rh_gens = [g for g in all_generations if g['is_reward_hacking']]
     non_rh_gens = [g for g in all_generations if not g['is_reward_hacking']]
     
-    num_features_to_plot = min(6, len(top_features))
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    axes = axes.flatten()
+    num_features_to_plot = min(20, len(top_overrep_features))
     
-    for i, feat_idx in enumerate(top_features[:num_features_to_plot]):
-        ax = axes[i]
+    # Create two separate plots: one for overrepresented, one for underrepresented
+    # Overrepresented features
+    fig1, axes1 = plt.subplots(5, 4, figsize=(20, 25))
+    axes1 = axes1.flatten()
+    
+    for i, feat_idx in enumerate(top_overrep_features[:num_features_to_plot]):
+        ax = axes1[i]
         
         # Get activations for this feature
         rh_acts = [g['features']['mean'][feat_idx].item() for g in rh_gens]
@@ -121,13 +124,39 @@ def plot_distribution_comparison(all_generations: List[Dict], top_features: List
         ax.hist(rh_acts, bins=20, alpha=0.5, label='RH', color='red')
         ax.set_xlabel('Mean Activation')
         ax.set_ylabel('Count')
-        ax.set_title(f'Feature {feat_idx}')
+        ax.set_title(f'Feature {feat_idx} (Rank {i+1})')
         ax.legend()
         ax.grid(alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / "activation_distributions.png", dpi=300, bbox_inches='tight')
-    print(f"Saved plot: {OUTPUT_DIR / 'activation_distributions.png'}")
+    plt.savefig(OUTPUT_DIR / "activation_distributions_overrepresented.png", dpi=300, bbox_inches='tight')
+    print(f"Saved plot: {OUTPUT_DIR / 'activation_distributions_overrepresented.png'}")
+    plt.close()
+    
+    # Underrepresented features
+    num_underrep_to_plot = min(20, len(top_underrep_features))
+    fig2, axes2 = plt.subplots(5, 4, figsize=(20, 25))
+    axes2 = axes2.flatten()
+    
+    for i, feat_idx in enumerate(top_underrep_features[:num_underrep_to_plot]):
+        ax = axes2[i]
+        
+        # Get activations for this feature
+        rh_acts = [g['features']['mean'][feat_idx].item() for g in rh_gens]
+        non_rh_acts = [g['features']['mean'][feat_idx].item() for g in non_rh_gens]
+        
+        # Plot histograms
+        ax.hist(non_rh_acts, bins=20, alpha=0.5, label='Non-RH', color='blue')
+        ax.hist(rh_acts, bins=20, alpha=0.5, label='RH', color='red')
+        ax.set_xlabel('Mean Activation')
+        ax.set_ylabel('Count')
+        ax.set_title(f'Feature {feat_idx} (Rank {i+1})')
+        ax.legend()
+        ax.grid(alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "activation_distributions_underrepresented.png", dpi=300, bbox_inches='tight')
+    print(f"Saved plot: {OUTPUT_DIR / 'activation_distributions_underrepresented.png'}")
     plt.close()
 
 
@@ -249,8 +278,9 @@ def main():
     plot_feature_differences(analysis_results, top_k=20)
     
     # Plot distributions for top features
-    top_features = analysis_results['top_overrepresented']['indices'][:6]
-    plot_distribution_comparison(all_generations, top_features)
+    top_overrep_features = analysis_results['top_overrepresented']['indices'][:20]
+    top_underrep_features = analysis_results['top_underrepresented']['indices'][:20]
+    plot_distribution_comparison(all_generations, top_overrep_features, top_underrep_features)
     
     # Analyze by task
     task_data = analyze_by_task(all_generations)
@@ -266,7 +296,8 @@ def main():
     print(f"{'='*80}")
     print(f"\nOutputs saved to: {OUTPUT_DIR}")
     print("  - feature_differences.png")
-    print("  - activation_distributions.png")
+    print("  - activation_distributions_overrepresented.png")
+    print("  - activation_distributions_underrepresented.png")
     print("  - rh_rate_by_task.png")
     print("  - feature_report.md")
 

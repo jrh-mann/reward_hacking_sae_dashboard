@@ -27,7 +27,7 @@ SAE_TRAINER = 0
 NUM_GENERATIONS_PER_PROMPT = 3
 MAX_NEW_TOKENS = 10000
 TEMPERATURE = 1.0  # Use sampling to get diverse responses
-BATCH_SIZE = 4  # Number of generations to process in parallel
+BATCH_SIZE = 2  # Number of generations to process in parallel
 OUTPUT_DIR = Path("reward_hacking_analysis_3_epochs")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 

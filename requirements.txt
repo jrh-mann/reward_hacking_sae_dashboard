@@ -18,3 +18,4 @@ nbformat
 openai
 scienceplots
 hf_transfer
+nnsight
