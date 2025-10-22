@@ -3,6 +3,9 @@
 # Start vLLM server with gpt-oss-20b model
 # This script starts an OpenAI-compatible API server
 
+# Activate virtual environment
+source .venv/bin/activate
+
 # Default configuration
 MODEL_NAME="${MODEL_NAME:-openai/gpt-oss-20b}"
 HOST="${HOST:-0.0.0.0}"

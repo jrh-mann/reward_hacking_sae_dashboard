@@ -19,3 +19,4 @@ openai
 scienceplots
 hf_transfer
 nnsight
+vllm
