@@ -19,6 +19,7 @@ import numpy as np
 from typing import List, Tuple, Dict
 from huggingface_hub import snapshot_download
 from dictionary_learning.utils import load_dictionary
+import matplotlib.pyplot as plt
 
 
 def load_steering_vectors(path: str) -> torch.Tensor:
@@ -57,6 +58,103 @@ def cosine_similarity(vec1: torch.Tensor, vec2: torch.Tensor) -> float:
     vec1_norm = vec1 / (vec1.norm() + 1e-8)
     vec2_norm = vec2 / (vec2.norm() + 1e-8)
     return float(vec1_norm @ vec2_norm)
+
+
+def compute_progressive_metrics(
+    steering_vec: torch.Tensor,
+    features: List[Tuple[int, float]],
+    decoder: torch.Tensor,
+    method_name: str = "method"
+) -> Tuple[List[float], List[float]]:
+    """
+    Compute cosine similarity and L2 error as features are added progressively.
+    
+    Args:
+        steering_vec: Original steering vector
+        features: List of (feature_id, weight/activation) tuples
+        decoder: SAE decoder weights
+        method_name: Name of the method (for normalization handling)
+    
+    Returns:
+        - List of cosine similarities (one per top-k)
+        - List of L2 reconstruction errors (one per top-k)
+    """
+    cos_sims = []
+    l2_errors = []
+    
+    reconstruction = torch.zeros_like(steering_vec)
+    
+    for i, (feat_id, weight) in enumerate(features):
+        # Add this feature to the reconstruction
+        if method_name == "topk":
+            # Top-k uses normalized features
+            feature_vec = decoder[:, feat_id] / (decoder[:, feat_id].norm() + 1e-8)
+            reconstruction += feature_vec
+        else:
+            # Other methods use weighted features
+            feature_vec = decoder[:, feat_id]
+            reconstruction += weight * feature_vec
+        
+        # Compute metrics
+        cos_sim = cosine_similarity(steering_vec, reconstruction)
+        l2_error = (steering_vec - reconstruction).norm().item()
+        
+        cos_sims.append(cos_sim)
+        l2_errors.append(l2_error)
+    
+    return cos_sims, l2_errors
+
+
+def plot_progressive_metrics(
+    results_dict: Dict[str, Tuple[List[float], List[float]]],
+    output_path: str = "progressive_reconstruction.png"
+):
+    """
+    Plot cosine similarity and L2 error as features are added progressively.
+    
+    Args:
+        results_dict: Dictionary mapping method name to (cos_sims, l2_errors) tuple
+        output_path: Path to save the plot
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    
+    colors = {
+        'encoder': '#2E86AB',
+        'greedy': '#A23B72',
+        'topk': '#F18F01'
+    }
+    
+    # Plot cosine similarity
+    for method_name, (cos_sims, l2_errors) in results_dict.items():
+        x = list(range(1, len(cos_sims) + 1))
+        color = colors.get(method_name, '#333333')
+        ax1.plot(x, cos_sims, marker='o', label=method_name.capitalize(), 
+                 color=color, linewidth=2, markersize=4)
+    
+    ax1.set_xlabel('Number of Top Features', fontsize=12)
+    ax1.set_ylabel('Cosine Similarity', fontsize=12)
+    ax1.set_title('Cosine Similarity vs. Number of Features', fontsize=14, fontweight='bold')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    ax1.set_ylim([0, 1])
+    
+    # Plot L2 reconstruction error
+    for method_name, (cos_sims, l2_errors) in results_dict.items():
+        x = list(range(1, len(l2_errors) + 1))
+        color = colors.get(method_name, '#333333')
+        ax2.plot(x, l2_errors, marker='o', label=method_name.capitalize(),
+                 color=color, linewidth=2, markersize=4)
+    
+    ax2.set_xlabel('Number of Top Features', fontsize=12)
+    ax2.set_ylabel('L2 Reconstruction Error', fontsize=12)
+    ax2.set_title('L2 Error vs. Number of Features', fontsize=14, fontweight='bold')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"\n  Graph saved to: {output_path}")
+    plt.close()
 
 
 def decompose_with_sae_encoder(
@@ -267,7 +365,13 @@ def main():
         type=str,
         choices=["encoder", "greedy", "topk", "all"],
         default="all",
-        help="Decomposition method to use"
+        help="Decomposition method: 'encoder' (most principled), 'greedy' (best reconstruction), 'topk' (baseline), 'all' (compare all)"
+    )
+    parser.add_argument(
+        "--output_graph",
+        type=str,
+        default=None,
+        help="Output path for progressive reconstruction graph (default: progressive_reconstruction_layerN_trainerM.png)"
     )
     
     args = parser.parse_args()
@@ -344,6 +448,27 @@ def main():
             print(f"  Cosine similarity: {cos_sim:.4f}")
             print(f"  L2 error: {l2_error:.4f}")
             print(f"  Features used: {len(features)}")
+    
+    # Compute progressive metrics and generate plot
+    if results:
+        print("\n" + "=" * 80)
+        print("GENERATING PROGRESSIVE RECONSTRUCTION GRAPH")
+        print("=" * 80)
+        
+        progressive_results = {}
+        for method_name, (features, reconstruction, cos_sim) in results.items():
+            print(f"\n  Computing progressive metrics for {method_name}...")
+            cos_sims, l2_errors = compute_progressive_metrics(
+                steering_vec, features, decoder, method_name
+            )
+            progressive_results[method_name] = (cos_sims, l2_errors)
+        
+        # Create and save the plot
+        if args.output_graph:
+            output_filename = args.output_graph
+        else:
+            output_filename = f"progressive_reconstruction_layer{args.layer}_trainer{args.trainer}.png"
+        plot_progressive_metrics(progressive_results, output_filename)
     
     # Generate dashboard URLs
     print("\n" + "=" * 80)
