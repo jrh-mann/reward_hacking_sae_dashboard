@@ -28,11 +28,16 @@ def initialize():
     
     print("Loading direction...")
     # Try to load from steering_vectors.pt first, fallback to get_direction
-    try:
+    '''try:
+        1 / 0
         direction = torch.load("steering_vectors.pt")[15].to("cuda:0").to(torch.bfloat16)
     except:
-        direction = get_direction(layer_idx=15, feature_idx=71990)
-        direction = direction.to("cuda:0").to(torch.bfloat16)
+        
+        direction = get_direction(layer_idx=15, feature_idx=71190)
+        direction = direction.to("cuda:0").to(torch.bfloat16)'''
+
+    direction = get_direction(layer_idx=15, feature_idx=71190)
+    direction = direction.to("cuda:0").to(torch.bfloat16)
     
     print("Loading data...")
     all_cots = json.load(open("all_complete_cots.json"))
