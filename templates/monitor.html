@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAE Feature Monitor</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 10px;
+            border-bottom: 2px solid #ddd;
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 16px;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+        }
+        .tab:hover {
+            color: #007bff;
+            background-color: #f8f9fa;
+        }
+        .tab.active {
+            color: #007bff;
+            border-bottom-color: #007bff;
+            font-weight: 600;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .controls {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-weight: 600;
+            color: #555;
+            font-size: 14px;
+        }
+        select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            min-width: 300px;
+        }
+        .filter-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .filter-btn {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background-color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .filter-btn:hover {
+            background-color: #f0f0f0;
+        }
+        .filter-btn.active {
+            background-color: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+        .metadata {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            display: none;
+        }
+        .metadata.show {
+            display: block;
+        }
+        .metadata-item {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .metadata-label {
+            font-weight: 600;
+            color: #555;
+        }
+        #graph {
+            margin-bottom: 30px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .tokens-container {
+            line-height: 2;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            padding: 20px;
+            background-color: #fafafa;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        .token {
+            display: inline-block;
+            padding: 2px 4px;
+            border-radius: 3px;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.1s;
+        }
+        .token:hover {
+            transform: scale(1.1);
+            z-index: 10;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .tooltip {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 1000;
+            pointer-events: none;
+            white-space: nowrap;
+            display: none;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-size: 16px;
+        }
+        .section-header {
+            font-weight: 600;
+            color: #333;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            font-size: 16px;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+        }
+        
+        /* Max Activating Tokens Styles */
+        .max-act-item {
+            border: 1px solid #ddd;
+            margin: 12px 0;
+            padding: 12px;
+            border-radius: 6px;
+            background: #fafafa;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .max-act-item:hover {
+            background: #f0f0f0;
+        }
+        .max-act-item.collapsed .max-act-context-full {
+            display: none;
+        }
+        .max-act-item.collapsed .max-act-context-preview {
+            display: block;
+        }
+        .max-act-item:not(.collapsed) .max-act-context-full {
+            display: block;
+        }
+        .max-act-item:not(.collapsed) .max-act-context-preview {
+            display: none;
+        }
+        .max-act-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .max-act-rank {
+            font-weight: 700;
+            color: #007bff;
+            font-size: 16px;
+        }
+        .max-act-meta {
+            color: #666;
+            font-size: 13px;
+        }
+        .max-act-activation {
+            font-weight: 600;
+            color: #d32f2f;
+            font-size: 14px;
+        }
+        .max-act-context {
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            line-height: 1.6;
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+        }
+        .max-act-token-highlight {
+            background-color: #d84400;
+            color: white;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: 700;
+        }
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .pagination button {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .pagination button:hover:not(:disabled) {
+            background-color: #f0f0f0;
+        }
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .pagination .page-info {
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 SAE Feature Monitor (Layer 15, Feature 71990)</h1>
+        
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('sequence')">📊 Sequence Viewer</button>
+            <button class="tab" onclick="switchTab('maxact')">🔥 Max Activating Tokens</button>
+        </div>
+        
+        <!-- Sequence Viewer Tab -->
+        <div id="sequence-tab" class="tab-content active">
+        <div class="controls">
+            <div class="control-group">
+                <label for="sample-select">Select Sample:</label>
+                <select id="sample-select">
+                    <option value="">-- Select a sample --</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>Filter by Behavior:</label>
+                <div class="filter-buttons">
+                    <button class="filter-btn active" data-filter="all">All</button>
+                    <button class="filter-btn" data-filter="honest">Honest</button>
+                    <button class="filter-btn" data-filter="reward_hacking">Reward Hacking</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="metadata" id="metadata">
+            <div class="metadata-item"><span class="metadata-label">Experiment:</span> <span id="meta-experiment">-</span></div>
+            <div class="metadata-item"><span class="metadata-label">Behavior:</span> <span id="meta-behavior">-</span></div>
+            <div class="metadata-item"><span class="metadata-label">Task:</span> <span id="meta-task">-</span></div>
+        </div>
+        
+        <div id="graph"></div>
+        
+        <div id="content">
+            <div class="loading">Select a sample to visualize</div>
+        </div>
+        </div> <!-- End sequence-tab -->
+        
+        <!-- Max Activating Tokens Tab -->
+        <div id="maxact-tab" class="tab-content">
+            <div style="margin-bottom: 20px;">
+                <p style="color: #666;">
+                    Showing full sequences ranked by their maximum token activation. 
+                    <strong>Click any sequence to expand/collapse.</strong>
+                    By default, only a snippet around the peak token is shown (±60 tokens).
+                    Only the top 10% most activating tokens are highlighted 
+                    with a gradient from <span style="background-color: hsl(45, 85%, 75%); padding: 2px 6px; border-radius: 2px;">light yellow-orange</span> to 
+                    <span style="background-color: hsl(15, 100%, 50%); padding: 2px 6px; border-radius: 2px; color: white;">dark red-orange</span>. 
+                    The peak firing token is highlighted with a 
+                    <span style="background-color: #ff6b35; color: white; padding: 2px 4px; border-radius: 3px; font-weight: bold; border: 2px solid #d84400;">bright orange border</span>.
+                    Hover over any token to see its exact activation value.
+                </p>
+            </div>
+            
+            <div id="max-act-content">
+                <div class="loading">Loading max activating tokens...</div>
+            </div>
+            
+            <div class="pagination" id="pagination" style="display: none;">
+                <button id="prev-btn" onclick="loadMaxActivatingPage(currentPage - 1)">← Previous</button>
+                <span class="page-info" id="page-info">Page 1</span>
+                <button id="next-btn" onclick="loadMaxActivatingPage(currentPage + 1)">Next →</button>
+            </div>
+        </div> <!-- End maxact-tab -->
+        
+    </div> <!-- End container -->
+    
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        let allSamples = [];
+        let currentFilter = 'all';
+        
+        // Load samples on page load
+        async function loadSamples() {
+            const response = await fetch('/api/samples');
+            allSamples = await response.json();
+            updateSampleDropdown();
+        }
+        
+        function updateSampleDropdown() {
+            const select = document.getElementById('sample-select');
+            const currentValue = select.value;
+            select.innerHTML = '<option value="">-- Select a sample --</option>';
+            
+            const filteredSamples = allSamples.filter(sample => {
+                if (currentFilter === 'all') return true;
+                return sample.behavior_label === currentFilter;
+            });
+            
+            filteredSamples.forEach(sample => {
+                const option = document.createElement('option');
+                option.value = sample.index;
+                option.textContent = `${sample.experiment} (${sample.behavior_label})`;
+                select.appendChild(option);
+            });
+            
+            if (currentValue && select.querySelector(`option[value="${currentValue}"]`)) {
+                select.value = currentValue;
+            }
+        }
+        
+        // Filter button handlers
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentFilter = btn.dataset.filter;
+                updateSampleDropdown();
+            });
+        });
+        
+        // Sample selection handler
+        document.getElementById('sample-select').addEventListener('change', async (e) => {
+            const index = e.target.value;
+            if (!index) {
+                document.getElementById('content').innerHTML = '<div class="loading">Select a sample to visualize</div>';
+                document.getElementById('metadata').classList.remove('show');
+                document.getElementById('graph').innerHTML = '';
+                return;
+            }
+            
+            document.getElementById('content').innerHTML = '<div class="loading">Loading...</div>';
+            
+            const response = await fetch(`/api/sequence/${index}`);
+            const data = await response.json();
+            
+            displaySequence(data);
+        });
+        
+        function displaySequence(data) {
+            // Update metadata
+            document.getElementById('meta-experiment').textContent = data.experiment;
+            document.getElementById('meta-behavior').textContent = data.behavior_label;
+            document.getElementById('meta-task').textContent = data.task_name;
+            document.getElementById('metadata').classList.add('show');
+            
+            // Create graph
+            createGraph(data.tokens, data.firings, data.response_start);
+            
+            // Create token visualization
+            createTokenVisualization(data.tokens, data.firings, data.response_start);
+        }
+        
+        function createGraph(tokens, firings, responseStart) {
+            const trace = {
+                y: firings,
+                type: 'scatter',
+                mode: 'lines',
+                line: { color: '#d62728', width: 2 },
+                hovertemplate: 'Token %{x}<br>Firing: %{y:.4f}<br>%{text}<extra></extra>',
+                text: tokens.map(t => `"${t.replace(/\n/g, '\\n')}"`),
+                name: 'Firing'
+            };
+            
+            const layout = {
+                title: 'Token-by-Token Firings',
+                xaxis: { title: 'Token Position' },
+                yaxis: { title: 'Firing Value' },
+                hovermode: 'closest',
+                height: 400,
+                shapes: responseStart > 0 ? [{
+                    type: 'line',
+                    x0: responseStart,
+                    x1: responseStart,
+                    y0: 0,
+                    y1: 1,
+                    yref: 'paper',
+                    line: {
+                        color: 'blue',
+                        width: 2,
+                        dash: 'dash'
+                    }
+                }] : [],
+                annotations: responseStart > 0 ? [{
+                    x: responseStart,
+                    y: 1,
+                    yref: 'paper',
+                    text: 'Response Start',
+                    showarrow: true,
+                    arrowhead: 2,
+                    ax: 0,
+                    ay: -40
+                }] : []
+            };
+            
+            Plotly.newPlot('graph', [trace], layout);
+        }
+        
+        function createTokenVisualization(tokens, firings, responseStart) {
+            const container = document.getElementById('content');
+            
+            // Calculate min/max for normalization
+            const minFiring = Math.min(...firings);
+            const maxFiring = Math.max(...firings);
+            
+            let html = '';
+            
+            // Reasoning section
+            if (responseStart > 0) {
+                html += '<div class="section-header">🧠 Reasoning</div>';
+                html += '<div class="tokens-container">';
+                for (let i = 0; i < responseStart; i++) {
+                    html += createTokenHTML(tokens[i], firings[i], i, minFiring, maxFiring);
+                }
+                html += '</div>';
+                
+                html += '<div class="section-header">💬 Response</div>';
+                html += '<div class="tokens-container">';
+                for (let i = responseStart; i < tokens.length; i++) {
+                    html += createTokenHTML(tokens[i], firings[i], i, minFiring, maxFiring);
+                }
+                html += '</div>';
+            } else {
+                html += '<div class="tokens-container">';
+                for (let i = 0; i < tokens.length; i++) {
+                    html += createTokenHTML(tokens[i], firings[i], i, minFiring, maxFiring);
+                }
+                html += '</div>';
+            }
+            
+            container.innerHTML = html;
+            
+            // Add hover handlers
+            document.querySelectorAll('.token').forEach(token => {
+                token.addEventListener('mouseenter', showTooltip);
+                token.addEventListener('mouseleave', hideTooltip);
+            });
+        }
+        
+        function createTokenHTML(token, firing, index, minFiring, maxFiring) {
+            // Normalize firing to 0-1 range for coloring
+            const normalized = maxFiring > minFiring ? 
+                (firing - minFiring) / (maxFiring - minFiring) : 0.5;
+            
+            // Higher firing = darker (155), lower firing = lighter (255)
+            const red = Math.round(255 - (normalized * 100));
+            const color = `rgb(${red}, 0, 0)`;
+            
+            // For text color, keep black for readability
+            const textColor = 'black';
+            
+            // Escape HTML
+            const escapedToken = token
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/\n/g, '↵\n');
+            
+            return `<span class="token" style="background-color: ${color}; color: ${textColor};" 
+                         data-index="${index}" 
+                         data-firing="${firing.toFixed(4)}" 
+                         data-token="${token.replace(/"/g, '&quot;')}">${escapedToken}</span>`;
+        }
+        
+        function showTooltip(e) {
+            const tooltip = document.getElementById('tooltip');
+            const token = e.target;
+            const firing = token.dataset.firing;
+            const index = token.dataset.index;
+            const tokenText = token.dataset.token.replace(/\n/g, '\\n');
+            
+            tooltip.innerHTML = `Token #${index}: "${tokenText}"<br>Firing: ${firing}`;
+            tooltip.style.display = 'block';
+            
+            const rect = token.getBoundingClientRect();
+            tooltip.style.left = rect.left + 'px';
+            tooltip.style.top = (rect.top - tooltip.offsetHeight - 5) + 'px';
+        }
+        
+        function hideTooltip() {
+            document.getElementById('tooltip').style.display = 'none';
+        }
+        
+        // Tab switching
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            if (tabName === 'sequence') {
+                document.getElementById('sequence-tab').classList.add('active');
+            } else if (tabName === 'maxact') {
+                document.getElementById('maxact-tab').classList.add('active');
+                if (!maxActDataLoaded) {
+                    loadMaxActivatingPage(1);
+                }
+            }
+        }
+        
+        // Max activating tokens functionality
+        let currentPage = 1;
+        let itemsPerPage = 20;
+        let totalItems = 0;
+        let maxActDataLoaded = false;
+        
+        async function loadMaxActivatingPage(page) {
+            const offset = (page - 1) * itemsPerPage;
+            const contentDiv = document.getElementById('max-act-content');
+            contentDiv.innerHTML = '<div class="loading">Loading...</div>';
+            
+            try {
+                const response = await fetch(`/api/max_activating?limit=${itemsPerPage}&offset=${offset}`);
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    contentDiv.innerHTML = `<div style="color: red; padding: 20px;">${error.error || 'Failed to load data'}</div>`;
+                    return;
+                }
+                
+                const data = await response.json();
+                totalItems = data.total;
+                currentPage = page;
+                maxActDataLoaded = true;
+                
+                displayMaxActivatingTokens(data.data, offset);
+                updatePagination();
+                
+            } catch (error) {
+                contentDiv.innerHTML = `<div style="color: red; padding: 20px;">Error: ${error.message}</div>`;
+            }
+        }
+        
+        function displayMaxActivatingTokens(sequences, offset) {
+            const contentDiv = document.getElementById('max-act-content');
+            
+            if (sequences.length === 0) {
+                contentDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No data available</div>';
+                return;
+            }
+            
+            let html = '';
+            
+            sequences.forEach((seq, idx) => {
+                const rank = offset + idx + 1;
+                const maxIdx = seq.max_token_idx;
+                const maxActivation = seq.max_activation;
+                
+                // Find min/max activations for color scaling
+                const minAct = Math.min(...seq.activations);
+                const maxAct = Math.max(...seq.activations);
+                
+                // Escape HTML
+                const escapeHtml = (text) => {
+                    return text.replace(/&/g, '&amp;')
+                               .replace(/</g, '&lt;')
+                               .replace(/>/g, '&gt;')
+                               .replace(/"/g, '&quot;')
+                               .replace(/\n/g, '↵\n')
+                               .replace(/\t/g, '→');
+                };
+                
+                // Calculate threshold for top 10% of activations
+                const sortedActivations = [...seq.activations].sort((a, b) => b - a);
+                const top10PercentIndex = Math.floor(sortedActivations.length * 0.1);
+                const threshold = sortedActivations[top10PercentIndex];
+                
+                // Helper function to create colored token
+                const createColoredToken = (token, i, activation, isPeak) => {
+                    let style;
+                    let title = `Token ${i}: activation ${activation.toFixed(4)}`;
+                    
+                    if (isPeak) {
+                        style = 'background-color: #ff6b35; color: white; font-weight: bold; padding: 2px 4px; border-radius: 3px; border: 2px solid #d84400;';
+                    } else if (activation >= threshold) {
+                        const normalized = (activation - threshold) / (maxAct - threshold);
+                        const hue = 45 - (normalized * 30);
+                        const saturation = 85 + (normalized * 15);
+                        const lightness = 75 - (normalized * 25);
+                        style = `background-color: hsl(${hue}, ${saturation}%, ${lightness}%); padding: 2px 4px; border-radius: 2px;`;
+                    } else {
+                        style = 'padding: 2px 4px;';
+                    }
+                    
+                    return `<span style="${style}" title="${title}">${escapeHtml(token)}</span>`;
+                };
+                
+                // Create full colored token sequence
+                let coloredTokensFull = '';
+                seq.tokens.forEach((token, i) => {
+                    const activation = seq.activations[i];
+                    const isPeak = (i === maxIdx);
+                    coloredTokensFull += createColoredToken(token, i, activation, isPeak);
+                });
+                
+                // Create preview: window around peak token (e.g., ±60 tokens)
+                const PREVIEW_WINDOW = 60;
+                const previewStart = Math.max(0, maxIdx - PREVIEW_WINDOW);
+                const previewEnd = Math.min(seq.tokens.length, maxIdx + PREVIEW_WINDOW + 1);
+                
+                let coloredTokensPreview = '';
+                if (previewStart > 0) coloredTokensPreview += '... ';
+                
+                for (let i = previewStart; i < previewEnd; i++) {
+                    const token = seq.tokens[i];
+                    const activation = seq.activations[i];
+                    const isPeak = (i === maxIdx);
+                    coloredTokensPreview += createColoredToken(token, i, activation, isPeak);
+                }
+                
+                if (previewEnd < seq.tokens.length) coloredTokensPreview += ' ...';
+                
+                html += `
+                    <div class="max-act-item collapsed" onclick="this.classList.toggle('collapsed')">
+                        <div class="max-act-header">
+                            <div>
+                                <span class="max-act-rank">#${rank}</span>
+                                ${seq.sample_id !== undefined ? `<span class="max-act-meta"> | Sample: ${seq.sample_id}</span>` : ''}
+                                ${seq.conversation_id ? `<span class="max-act-meta"> | Conv: ${seq.conversation_id.slice(0, 12)}...</span>` : ''}
+                                <span class="max-act-meta"> | Peak at position: ${maxIdx} / ${seq.tokens.length}</span>
+                            </div>
+                            <div class="max-act-activation">
+                                Max Activation: ${maxActivation.toFixed(4)}
+                            </div>
+                        </div>
+                        <div class="max-act-context-preview" style="line-height: 1.8;">${coloredTokensPreview}</div>
+                        <div class="max-act-context-full" style="line-height: 1.8;">${coloredTokensFull}</div>
+                    </div>
+                `;
+            });
+            
+            contentDiv.innerHTML = html;
+        }
+        
+        function updatePagination() {
+            const paginationDiv = document.getElementById('pagination');
+            const prevBtn = document.getElementById('prev-btn');
+            const nextBtn = document.getElementById('next-btn');
+            const pageInfo = document.getElementById('page-info');
+            
+            const totalPages = Math.ceil(totalItems / itemsPerPage);
+            
+            paginationDiv.style.display = 'flex';
+            prevBtn.disabled = currentPage <= 1;
+            nextBtn.disabled = currentPage >= totalPages;
+            pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${totalItems} total tokens)`;
+        }
+        
+        // Initialize
+        loadSamples();
+    </script>
+</body>
+</html>
+
